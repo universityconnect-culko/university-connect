@@ -695,6 +695,7 @@ function authErrorMessage(err) {
     case "auth/user-not-found": return "Incorrect UID or password.";
     case "auth/too-many-requests": return "Too many attempts. Please wait a few minutes and try again.";
     case "auth/network-request-failed": return "Network error. Check your connection.";
+    case "auth/user-disabled": return "Your account has been blocked. Please contact the admin.";
     default:
       if (err.message === "UID_TAKEN") return "This College UID is already registered.";
       console.error(err);
@@ -833,7 +834,7 @@ async function getEmailForUid(rawUid) {
   const snap = await getDoc(doc(db, "uids", normalizeUid(rawUid)));
   return snap.exists() ? snap.data().email : null;
 }
-
+const ADMIN_DOMAIN = "hardikadmin@admin.campusconnect.example"; // must match admin.html
 loginView.addEventListener("submit", async event => {
   event.preventDefault();
   clearNotice();
@@ -845,17 +846,33 @@ loginView.addEventListener("submit", async event => {
 
   setLoading(loginView, true, "Logging in...");
 
-  try {
-    const email = await getEmailForUid(uid);
-    // Same message for "unknown UID" and "wrong password"
-    if (!email) throw { code: "auth/invalid-credential" };
-
+   try {
     await setPersistence(auth, remember ? browserLocalPersistence : browserSessionPersistence);
+
+    // Student UID -> student email. Otherwise try it as an admin ID.
+    const studentEmail = await getEmailForUid(uid);
+    const id = normalizeUid(uid);
+    if (!studentEmail && !/^[a-z0-9._-]{3,30}$/.test(id)) throw { code: "auth/invalid-credential" };
+    const email = studentEmail || (id + "@" + ADMIN_DOMAIN);
+
     const cred = await signInWithEmailAndPassword(auth, email, password);
 
-   
+    // Admin: go to the admin page
+    const adminSnap = await getDoc(doc(db, "admins", cred.user.uid));
+    if (adminSnap.exists()) {
+      showNotice("Welcome, admin! Redirecting...", "success");
+      setTimeout(() => { window.location.href = "admin.html"; }, 600);
+      return;
+    }
 
-       showNotice("Login successful! Redirecting...", "success");
+    // Blocked student: stop here
+    const blockedSnap = await getDoc(doc(db, "blocked", cred.user.uid));
+    if (blockedSnap.exists()) {
+      await signOut(auth);
+      throw { code: "auth/user-disabled" };
+    }
+
+    showNotice("Login successful! Redirecting...", "success");
     setTimeout(() => { window.location.href = "dashboard.html"; }, 800);
   } catch (err) {
     showNotice(authErrorMessage(err));
