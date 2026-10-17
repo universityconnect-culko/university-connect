@@ -152,6 +152,7 @@ body::after{translate:0 calc(var(--scroll,0) * .1px)}
       <a href="marketplace.html">Marketplace</a>
       <a href="#sections">Rentals</a>
       <a href="lostandfound.html">Lost &amp; Found</a>
+      <a href="library.html">Library</a>
       <a href="#events">Events</a>
     </nav>
     <div class="user">
@@ -191,6 +192,10 @@ body::after{translate:0 calc(var(--scroll,0) * .1px)}
           <p>Fests, workshops and club meetups, all in one calendar.</p><span class="go">View events →</span>
         </button>
       </div>
+      <button class="card reveal zoom" type="button" data-name="Library" style="display:block;width:100%;margin:-40px 0 64px">
+        <div class="card-icon" style="background:linear-gradient(145deg,#d4c2ff,#a58bff)">📚</div><h3>Library Check-in</h3>
+        <p>Scan the QR at the library entrance, or tap here to log your visit with your name, UID and time.</p><span class="go">Check in →</span>
+      </button>
     </section>
 
     <section id="events">
@@ -276,6 +281,7 @@ document.querySelectorAll(".card").forEach(card => {
   });
   card.addEventListener("click", () => {
     if (card.dataset.name === "Marketplace") { location.href = "marketplace.html"; return; }
+    if (card.dataset.name === "Library") { location.href = "library.html"; return; }
     showToast(card.dataset.name + " is coming soon.");
   });
 });
