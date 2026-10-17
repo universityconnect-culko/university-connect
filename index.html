@@ -572,10 +572,12 @@ document.getElementById("forgotPassword").addEventListener("click", async () => 
   }
 });
 
+
 document.querySelectorAll("input, select").forEach(i => {
   i.addEventListener("input", clearNotice);
   i.addEventListener("change", clearNotice);
 });
+onAuthStateChanged(auth, user => { if (user) loadEvents(); });
 </script>
 
 <body>

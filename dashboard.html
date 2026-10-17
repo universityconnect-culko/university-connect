@@ -217,8 +217,9 @@ body::after{translate:0 calc(var(--scroll,0) * .1px)}
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-
-const LOGIN_PAGE = "login.html";   // change if your login file has another name
+import { getApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getFirestore, collection, query, where, orderBy, limit, getDocs } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+const LOGIN_PAGE = "index.html";   // change if your login file has another name
 
 const firebaseConfig = {
   apiKey: "AIzaSyCKfSjhTBaoK9Kjm_NFx7I0Yf8WT7vyWPo",
@@ -284,6 +285,7 @@ document.querySelectorAll(".card").forEach(card => {
     if (card.dataset.name === "Library") { location.href = "library.html"; return; }
     if (card.dataset.name === "Events") { location.href = "event.html"; return; }
     showToast(card.dataset.name + " is coming soon.");
+    if (card.dataset.name === "Lost & Found") { location.href = "lostandfound.html"; return; }
   });
 });
 
@@ -322,6 +324,90 @@ if (!matchMedia("(prefers-reduced-motion: reduce)").matches) {
     card.addEventListener("mouseleave", () => { card.style.transform = ""; });
   });
 }
+// ---------- Real events from Firestore (posted by the admin) ----------
+const evPad = n => String(n).padStart(2, "0");
+const evTime = t => { const [h, m] = (t || "00:00").split(":").map(Number); return (h % 12 || 12) + ":" + evPad(m) + " " + (h < 12 ? "AM" : "PM"); };
+const evDate = s => { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d); };
+
+// Pop-up with the full details and the poster
+function showEvent(ev) {
+  let dlg = document.getElementById("evDlg");
+  if (!dlg) {
+    const st = document.createElement("style");
+    st.textContent =
+      "#evDlg{border:none;border-radius:36px;background:var(--surface);color:var(--text);box-shadow:var(--clay);padding:0;width:min(560px,94vw);max-height:92vh;overflow:auto;margin:auto;font-family:inherit}" +
+      "#evDlg::backdrop{background:rgba(120,108,190,.4);backdrop-filter:blur(4px)}" +
+      "#evDlg .box{padding:28px;position:relative}" +
+      "#evDlg img{width:100%;max-height:300px;object-fit:contain;border-radius:24px;background:#eceeff;margin-bottom:16px}" +
+      "#evDlg h2{font-size:24px;font-weight:900;letter-spacing:-.5px;margin-bottom:12px;padding-right:44px}" +
+      "#evDlg .tags{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}" +
+      "#evDlg .tags span{padding:7px 14px;border-radius:14px;font-size:12px;font-weight:800;color:var(--purple);background:#eceeff;box-shadow:inset 4px 4px 8px rgba(130,118,200,.22),inset -4px -4px 8px rgba(255,255,255,.9)}" +
+      "#evDlg p{line-height:1.7;font-weight:600;color:#4a466b;white-space:pre-wrap;word-break:break-word}" +
+      "#evDlg .x{position:absolute;top:16px;right:16px;width:42px;height:42px;border-radius:50%;border:none;cursor:pointer;font-weight:900;font-size:15px;background:var(--surface);color:var(--text);box-shadow:var(--clay)}";
+    document.head.appendChild(st);
+    dlg = document.createElement("dialog"); dlg.id = "evDlg";
+    dlg.addEventListener("click", e => { if (e.target === dlg) dlg.close(); });
+    document.body.appendChild(dlg);
+  }
+  dlg.replaceChildren();
+  const box = document.createElement("div"); box.className = "box";
+  const x = document.createElement("button"); x.type = "button"; x.className = "x"; x.textContent = "✕";
+  x.setAttribute("aria-label", "Close"); x.addEventListener("click", () => dlg.close());
+  box.appendChild(x);
+  if (typeof ev.poster === "string" && ev.poster.startsWith("data:image/jpeg;base64,")) {
+    const img = document.createElement("img"); img.src = ev.poster; img.alt = ev.title + " poster"; box.appendChild(img);
+  }
+  const h2 = document.createElement("h2"); h2.textContent = ev.title; box.appendChild(h2);
+  const tags = document.createElement("div"); tags.className = "tags";
+  [ev.category || "Event",
+   "📅 " + evDate(ev.date).toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" }),
+   "🕒 " + evTime(ev.time),
+   "📍 " + (ev.venue || "Campus")].forEach(t => { const s = document.createElement("span"); s.textContent = t; tags.appendChild(s); });
+  box.appendChild(tags);
+  if (ev.description) { const p = document.createElement("p"); p.textContent = ev.description; box.appendChild(p); }
+  dlg.appendChild(box);
+  dlg.showModal();
+}
+
+async function loadEvents() {
+  const box = document.querySelector("#events .events");
+  if (!box) return;
+  const d = new Date();
+  const today = d.getFullYear() + "-" + evPad(d.getMonth() + 1) + "-" + evPad(d.getDate());
+  try {
+    const db = getFirestore(getApp());
+    const snap = await getDocs(query(collection(db, "events"), where("date", ">=", today), orderBy("date", "asc"), limit(10)));
+    const list = snap.docs.map(x => x.data())
+      .sort((a, b) => (a.date + (a.time || "")).localeCompare(b.date + (b.time || ""))).slice(0, 3);
+    box.replaceChildren();
+    document.querySelector("#events .section-sub").textContent =
+      list.length ? "Tap an event to see the details." : "No upcoming events yet. Check back soon!";
+    list.forEach(ev => {
+      const dt = evDate(ev.date);
+      const row = document.createElement("div"); row.className = "event"; row.style.cursor = "pointer";
+      const badge = document.createElement("div"); badge.className = "date";
+      const inner = document.createElement("div"), b = document.createElement("b");
+      b.textContent = dt.getDate();
+      inner.append(b, dt.toLocaleDateString("en-IN", { month: "short" }).toUpperCase());
+      badge.appendChild(inner);
+      const info = document.createElement("div"), h4 = document.createElement("h4"), p = document.createElement("p");
+      info.style.cssText = "flex:1;min-width:0";
+      h4.textContent = ev.title; p.textContent = (ev.venue || "Campus") + ", " + evTime(ev.time);
+      info.append(h4, p);
+      row.append(badge, info);
+      // Poster thumbnail
+      if (typeof ev.poster === "string" && ev.poster.startsWith("data:image/jpeg;base64,")) {
+        const img = document.createElement("img");
+        img.src = ev.poster; img.alt = ev.title + " poster"; img.loading = "lazy";
+        img.style.cssText = "width:96px;height:72px;object-fit:cover;border-radius:18px;flex-shrink:0;box-shadow:5px 6px 12px rgba(130,118,200,.3)";
+        row.appendChild(img);
+      }
+      row.addEventListener("click", () => showEvent(ev));
+      box.appendChild(row);
+    });
+  } catch (err) { console.error(err); }   // if loading fails, the sample events stay
+}
+onAuthStateChanged(auth, user => { if (user) loadEvents(); });
 </script>
 </body>
 </html>
