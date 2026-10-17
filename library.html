@@ -112,8 +112,6 @@ h1{font-size:26px;font-weight:900;letter-spacing:-.6px}
   </div>
 </main>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
@@ -142,6 +140,26 @@ const lsGet = k => { try { return localStorage.getItem(k); } catch { return null
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
 
 let me = null, profile = null, stream = null, raf = 0, busy = false, currentCode = null;
+
+// Loads a script, trying each address in turn until one works
+function loadScript(urls) {
+  return new Promise((resolve, reject) => {
+    let i = 0;
+    const next = () => {
+      if (i >= urls.length) return reject(new Error("load failed"));
+      const sc = document.createElement("script");
+      sc.src = urls[i++]; sc.onload = resolve;
+      sc.onerror = () => { sc.remove(); next(); };
+      document.head.appendChild(sc);
+    };
+    next();
+  });
+}
+const JSQR_URLS = ["https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js", "https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js", "https://unpkg.com/jsqr@1.4.0/dist/jsQR.js"];
+const QR_URLS = ["https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js", "https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js", "https://unpkg.com/qrcode-generator@1.4.4/qrcode.js"];
+// Many phones can read QR codes natively, with no download needed
+let detector = null;
+if ("BarcodeDetector" in window) { try { detector = new BarcodeDetector({ formats: ["qr_code"] }); } catch {} }
 
 setInterval(tick, 1000); tick();
 function tick() {
@@ -183,7 +201,12 @@ $("scanBtn").addEventListener("click", async () => {
   const last = Number(lsGet("libLast_" + me.uid) || 0);
   if (last && (Date.now() - last) / 60000 < COOLDOWN_MIN)
     return setMsg("msg", "You already checked in at " + new Date(last).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", hour12: true }) + ".");
-  if (!window.jsQR) return setMsg("msg", "The QR scanner couldn't load. Check your connection and refresh.");
+  if (!detector && !window.jsQR) {
+    $("scanBtn").disabled = true;
+    try { await loadScript(JSQR_URLS); }
+    catch { $("scanBtn").disabled = false; return setMsg("msg", "Couldn't load the QR scanner. Your network or an ad blocker may be blocking it. Try another network, or turn the blocker off."); }
+    $("scanBtn").disabled = false;
+  }
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia)
     return setMsg("msg", "Camera isn't available here. Open the site over https in your phone's browser.");
   try {
@@ -199,16 +222,26 @@ function stopScan() {
   stream = null;
 }
 const cv = document.createElement("canvas"), cx = cv.getContext("2d", { willReadFrequently: true });
-function loop() {
+async function loop() {
   if (!stream) return;
   const v = $("video");
   if (v.readyState === v.HAVE_ENOUGH_DATA && v.videoWidth) {
-    const w = Math.min(640, v.videoWidth), h = Math.round(v.videoHeight * w / v.videoWidth);
-    cv.width = w; cv.height = h; cx.drawImage(v, 0, 0, w, h);
-    const img = cx.getImageData(0, 0, w, h);
-    const r = jsQR(img.data, w, h, { inversionAttempts: "dontInvert" });
-    if (r && r.data) {
-      const code = extractCode(r.data);
+    let text = null;
+    try {
+      if (detector) {
+        const r = await detector.detect(v);
+        if (r.length) text = r[0].rawValue;
+      } else {
+        const w = Math.min(640, v.videoWidth), h = Math.round(v.videoHeight * w / v.videoWidth);
+        cv.width = w; cv.height = h; cx.drawImage(v, 0, 0, w, h);
+        const img = cx.getImageData(0, 0, w, h);
+        const r = jsQR(img.data, w, h, { inversionAttempts: "dontInvert" });
+        if (r && r.data) text = r.data;
+      }
+    } catch {}
+    if (!stream) return;
+    if (text) {
+      const code = extractCode(text);
       if (code) { stopScan(); submit(code); return; }
       setMsg("scanMsg", "That isn't the library's check-in QR code.");
     }
@@ -245,7 +278,7 @@ async function loadAdmin() {
   currentCode = s.exists() && typeof s.data().code === "string" ? s.data().code : null;
   show("admin"); drawQR();
 }
-function drawQR() {
+async function drawQR() {
   const has = !!currentCode;
   $("qrbox").hidden = !has; $("printBtn").hidden = !has;
   $("codeText").textContent = has ? "Code: " + currentCode : "";
@@ -254,7 +287,10 @@ function drawQR() {
     ? "Generating a new code makes every old printed QR stop working."
     : "No QR code has been created yet.";
   if (!has) return;
-  if (!window.qrcode) return setMsg("adminMsg", "The QR library couldn't load. Check your connection and refresh.");
+  if (!window.qrcode) {
+    try { await loadScript(QR_URLS); }
+    catch { return setMsg("adminMsg", "Couldn't load the QR generator. Your network or an ad blocker may be blocking it."); }
+  }
   const qr = qrcode(0, "M"); qr.addData(PREFIX + currentCode); qr.make();
   const n = qr.getModuleCount(), cell = 8, m = 4, size = (n + 2 * m) * cell, c = $("qr"), g = c.getContext("2d");
   c.width = c.height = size; g.fillStyle = "#fff"; g.fillRect(0, 0, size, size); g.fillStyle = "#000";
