@@ -59,6 +59,11 @@ td small{display:block;color:var(--muted);font-weight:600;font-size:12px}
 .toast{position:fixed;left:50%;bottom:26px;transform:translate(-50%,30px);opacity:0;z-index:200;padding:14px 24px;border-radius:20px;font-weight:800;background:var(--surface);box-shadow:var(--clay);transition:all .3s;pointer-events:none;max-width:92vw;text-align:center}
 .toast.show{opacity:1;transform:translate(-50%,0)}
 @media(max-width:560px){.nav{margin:10px;padding:10px 14px}.wrap{padding:22px 12px 50px}.who span{display:none}}
+.evform{padding:24px;border-radius:28px;background:var(--surface);box-shadow:var(--clay);margin-bottom:22px}
+.evform h2{font-size:20px;font-weight:900;margin-bottom:16px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:0 16px}
+textarea.in{height:auto;padding:14px 18px;min-height:90px;resize:vertical;line-height:1.5}
+input[type=file].in{padding:12px 18px;height:auto}
 </style>
 </head>
 <body>
@@ -86,6 +91,7 @@ td small{display:block;color:var(--muted);font-weight:600;font-size:12px}
         <button class="tab on" data-tab="users" type="button">Students</button>
         <button class="tab" data-tab="lf" type="button">Lost &amp; Found</button>
         <button class="tab" data-tab="mk" type="button">Marketplace</button>
+        <button class="tab" data-tab="ev" type="button">Events</button>
       </div>
       <input class="in" id="q" type="search" placeholder="Search…" aria-label="Search">
       <select class="in" id="lfFilter" aria-label="Status filter" hidden>
@@ -95,6 +101,20 @@ td small{display:block;color:var(--muted);font-weight:600;font-size:12px}
       </select>
       <button class="btn soft sm" id="refresh" type="button">Refresh</button>
     </div>
+    <form class="evform" id="evForm" hidden novalidate>
+      <h2>Post an event</h2>
+      <div class="grid2">
+        <div class="f"><label for="eTitle">Event name</label><input class="in" id="eTitle" maxlength="100"></div>
+        <div class="f"><label for="eCat">Category</label><select class="in" id="eCat"></select></div>
+        <div class="f"><label for="eVenue">Venue</label><input class="in" id="eVenue" maxlength="100" placeholder="e.g. Main auditorium"></div>
+        <div class="f"><label for="eDate">Date</label><input class="in" id="eDate" type="date"></div>
+        <div class="f"><label for="eTime">Time</label><input class="in" id="eTime" type="time"></div>
+        <div class="f"><label for="eFile">Poster (optional)</label><input class="in" id="eFile" type="file" accept="image/*"></div>
+      </div>
+      <div class="f"><label for="eDesc">Details</label><textarea class="in" id="eDesc" maxlength="1000" placeholder="What is it, who can join, anything to bring?"></textarea></div>
+      <div class="err" id="evErr" role="alert"></div>
+      <button class="btn" id="evSubmit" type="submit">Publish event</button>
+    </form>
     <div class="tw"><table><thead id="thead"></thead><tbody id="tbody"></tbody></table><div class="empty" id="empty" hidden></div></div>
   </main>
 </div>
@@ -104,7 +124,7 @@ td small{display:block;color:var(--muted);font-weight:600;font-size:12px}
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, setPersistence, browserSessionPersistence }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { getFirestore, collection, getDocs, getDoc, setDoc, deleteDoc, doc, query, orderBy, limit, serverTimestamp }
+import { getFirestore, collection, getDocs, getDoc, setDoc, deleteDoc, doc, query, orderBy, limit, serverTimestamp, addDoc }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 // Admin accounts are created in Firebase Auth with the email  <adminId>@ADMIN_DOMAIN
@@ -122,7 +142,7 @@ const auth = getAuth(app), db = getFirestore(app);
 const $ = id => document.getElementById(id);
 const el = (t, c, x) => { const n = document.createElement(t); if (c) n.className = c; if (x != null) n.textContent = x; return n; };
 
-let users = [], blocked = new Map(), lf = [], mk = [], tab = "users", busy = false;
+let users = [], blocked = new Map(), lf = [], mk = [], ev = [], tab = "users", busy = false;
 let tt; const toast = m => { const t = $("toast"); t.textContent = m; t.classList.add("show"); clearTimeout(tt); tt = setTimeout(() => t.classList.remove("show"), 3000); };
 const fmt = x => x && x.toMillis ? new Date(x.toMillis()).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "-";
 
@@ -157,16 +177,18 @@ $("logout").addEventListener("click", () => signOut(auth));
 // ---------- Data ----------
 async function loadAll() {
   try {
-    const [u, b, l, m] = await Promise.all([
+    const [u, b, l, m, v] = await Promise.all([
       getDocs(query(collection(db, "users"), limit(1000))),
       getDocs(collection(db, "blocked")),
       getDocs(query(collection(db, "lostfound"), orderBy("createdAt", "desc"), limit(500))),
-      getDocs(query(collection(db, "listings"), orderBy("createdAt", "desc"), limit(500)))
+      getDocs(query(collection(db, "listings"), orderBy("createdAt", "desc"), limit(500))),
+      getDocs(query(collection(db, "events"), orderBy("date", "desc"), limit(300))).catch(() => null)
     ]);
     users = u.docs.map(d => ({ id: d.id, ...d.data() }));
     blocked = new Map(b.docs.map(d => [d.id, d.data()]));
     lf = l.docs.map(d => ({ id: d.id, ...d.data() }));
     mk = m.docs.map(d => ({ id: d.id, ...d.data() }));
+    ev = v ? v.docs.map(d => ({ id: d.id, ...d.data() })) : [];
     render();
   } catch (err) { console.error(err); toast("Couldn't load data. Check your Firestore rules."); }
 }
@@ -176,7 +198,9 @@ $("refresh").addEventListener("click", loadAll);
 $("tabs").addEventListener("click", e => {
   const b = e.target.closest(".tab"); if (!b) return; tab = b.dataset.tab;
   document.querySelectorAll("#tabs .tab").forEach(t => t.classList.toggle("on", t === b));
-  $("lfFilter").hidden = tab !== "lf"; render();
+  $("lfFilter").hidden = tab !== "lf"; $("evForm").hidden = tab !== "ev";
+  if (tab === "ev") $("eDate").min = todayStr();
+  render();
 });
 $("q").addEventListener("input", render);
 $("lfFilter").addEventListener("change", render);
@@ -184,7 +208,7 @@ $("lfFilter").addEventListener("change", render);
 function stats() {
   const done = lf.filter(i => i.resolved).length;
   const s = [["Students", users.length], ["Blocked", blocked.size], ["Lost & Found reports", lf.length],
-             ["Recovered", done], ["Not recovered", lf.length - done], ["Marketplace listings", mk.length]];
+             ["Recovered", done], ["Not recovered", lf.length - done], ["Marketplace listings", mk.length], ["Events", ev.length]];
   $("stats").replaceChildren(...s.map(([k, v]) => { const d = el("div", "stat"); d.append(el("b", "", v), el("span", "", k)); return d; }));
 }
 function head(cols) { const tr = el("tr"); cols.forEach(c => tr.appendChild(el("th", "", c))); $("thead").replaceChildren(tr); }
@@ -220,6 +244,16 @@ function render() {
       cell(tr, i.ownerName || "-", i.ownerEmail); cell(tr, i.date || fmt(i.createdAt));
       tagCell(tr, i.resolved ? "Recovered" : "Not recovered", i.resolved ? "green" : "gray");
       const td = el("td"); td.appendChild(btn("Delete", "red", b => del("lostfound", i, b))); tr.appendChild(td); body.appendChild(tr);
+    });
+  } else if (tab === "ev") {
+    head(["Date", "Event", "Venue", "Category", "Actions"]);
+    ev.filter(i => match(q, i.title, i.venue, i.category, i.description))
+      .sort((a, b) => (b.date + (b.time || "")).localeCompare(a.date + (a.time || ""))).forEach(i => {
+      n++; const tr = el("tr");
+      cell(tr, i.date || "-", t12(i.time));
+      cell(tr, i.title, i.poster ? "With poster" : "");
+      cell(tr, i.venue || "-"); tagCell(tr, i.category || "Other", "");
+      const td = el("td"); td.appendChild(btn("Delete", "red", b => del("events", i, b))); tr.appendChild(td); body.appendChild(tr);
     });
   } else {
     head(["Type", "Listing", "Price", "Seller", "Posted", "Actions"]);
@@ -259,8 +293,59 @@ const resetPw = (u, b) => run(b, async () => {
 const del = (colName, item, b) => run(b, async () => {
   if (!confirm("Delete \"" + item.title + "\"? This can't be undone.")) return;
   await deleteDoc(doc(db, colName, item.id));
-  if (colName === "lostfound") lf = lf.filter(x => x.id !== item.id); else mk = mk.filter(x => x.id !== item.id);
+  if (colName === "lostfound") lf = lf.filter(x => x.id !== item.id);
+  else if (colName === "events") ev = ev.filter(x => x.id !== item.id);
+  else mk = mk.filter(x => x.id !== item.id);
   toast("Deleted."); render();
+});
+
+// ---------- Events: post from the admin panel ----------
+["Fest", "Workshop", "Club", "Sports", "Academic", "Other"].forEach(c => $("eCat").appendChild(new Option(c, c)));
+const pad = n => String(n).padStart(2, "0");
+function todayStr() { const d = new Date(); return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()); }
+const t12 = t => { if (!t) return ""; const [h, m] = t.split(":").map(Number); return (h % 12 || 12) + ":" + pad(m) + " " + (h < 12 ? "AM" : "PM"); };
+let evPoster = "";
+const evErr = m => { const e = $("evErr"); e.textContent = m || ""; e.classList.toggle("show", !!m); };
+function compress(file) {
+  return new Promise((res, rej) => {
+    const url = URL.createObjectURL(file), img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const k = Math.min(1, 900 / Math.max(img.width, img.height)), c = document.createElement("canvas");
+      c.width = Math.max(1, Math.round(img.width * k)); c.height = Math.max(1, Math.round(img.height * k));
+      const x = c.getContext("2d"); x.fillStyle = "#fff"; x.fillRect(0, 0, c.width, c.height); x.drawImage(img, 0, 0, c.width, c.height);
+      let q = 0.75, out = c.toDataURL("image/jpeg", q);
+      while (out.length > 350000 && q > 0.3) { q -= 0.15; out = c.toDataURL("image/jpeg", q); }
+      res(out);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); rej(); };
+    img.src = url;
+  });
+}
+$("eFile").addEventListener("change", async e => {
+  evErr(""); evPoster = ""; const f = e.target.files[0]; if (!f) return;
+  if (!f.type.startsWith("image/")) { e.target.value = ""; return evErr("Please choose an image file."); }
+  try {
+    const out = await compress(f);
+    if (out.length > 380000) { e.target.value = ""; return evErr("That poster is too large. Try a smaller image."); }
+    evPoster = out; toast("Poster added.");
+  } catch { e.target.value = ""; evErr("That file couldn't be read as an image."); }
+});
+$("evForm").addEventListener("submit", async e => {
+  e.preventDefault(); evErr("");
+  const title = $("eTitle").value.trim(), venue = $("eVenue").value.trim(), date = $("eDate").value, time = $("eTime").value;
+  if (title.length < 3) return evErr("Add an event name of at least 3 characters.");
+  if (!venue) return evErr("Add the venue.");
+  if (!date || !time) return evErr("Choose the date and time.");
+  const btn = $("evSubmit"); btn.disabled = true; btn.textContent = "Publishing…";
+  const data = { title, category: $("eCat").value, venue, date, time, description: $("eDesc").value.trim(),
+                 poster: evPoster, createdBy: auth.currentUser.uid };
+  try {
+    const ref = await addDoc(collection(db, "events"), { ...data, createdAt: serverTimestamp() });
+    ev.unshift({ id: ref.id, ...data });
+    $("evForm").reset(); evPoster = ""; render(); toast("Event published.");
+  } catch (err) { console.error(err); evErr("Couldn't publish. Check that the Events rules are published in Firestore."); }
+  finally { btn.disabled = false; btn.textContent = "Publish event"; }
 });
 </script>
 </body>
