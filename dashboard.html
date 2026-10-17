@@ -153,7 +153,7 @@ body::after{translate:0 calc(var(--scroll,0) * .1px)}
       <a href="#sections">Rentals</a>
       <a href="lostandfound.html">Lost &amp; Found</a>
       <a href="library.html">Library</a>
-      <a href="#events">Events</a>
+      <a href="event.html">Events</a>
     </nav>
     <div class="user">
       <div class="avatar" id="avatar">?</div>
@@ -168,7 +168,7 @@ body::after{translate:0 calc(var(--scroll,0) * .1px)}
       <h1 id="greeting">Welcome back, <span class="grad">student.</span></h1>
       <p>Buy and sell what you no longer need, rent what you only need once, find lost belongings and see what's happening on campus.</p>
       <a class="btn" href="#sections">Explore the campus</a>
-      <a class="btn ghost" href="#events">See upcoming events</a>
+      <a class="btn ghost" href="event.html">See upcoming events</a>
     </section>
 
     <section id="sections">
@@ -282,6 +282,7 @@ document.querySelectorAll(".card").forEach(card => {
   card.addEventListener("click", () => {
     if (card.dataset.name === "Marketplace") { location.href = "marketplace.html"; return; }
     if (card.dataset.name === "Library") { location.href = "library.html"; return; }
+    if (card.dataset.name === "Events") { location.href = "event.html"; return; }
     showToast(card.dataset.name + " is coming soon.");
   });
 });
